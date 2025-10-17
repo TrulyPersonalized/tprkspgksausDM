@@ -510,7 +510,7 @@
             align-items: center;
         }
         
-        .export-btn, .import-btn {
+        .export-btn, .import-btn, .migrate-btn {
             background: var(--secondary);
             color: var(--text);
             border: none;
@@ -524,8 +524,13 @@
             transition: background-color 0.2s, color 0.2s;
         }
         
-        .export-btn:hover, .import-btn:hover {
+        .export-btn:hover, .import-btn:hover, .migrate-btn:hover {
             background: var(--primary);
+            color: white;
+        }
+        
+        .migrate-btn {
+            background: var(--accent);
             color: white;
         }
         
@@ -542,6 +547,12 @@
             width: 100%;
             height: 100%;
             cursor: pointer;
+        }
+        
+        .image-path-info {
+            font-size: 0.8rem;
+            color: var(--muted);
+            margin-top: 5px;
         }
         
         @media (max-width: 900px) {
@@ -606,6 +617,9 @@
                 <div class="form-group">
                     <label for="skuPhoto">SKU Photo</label>
                     <input type="file" id="skuPhoto" accept="image/*">
+                    <div class="image-path-info" id="imagePathInfo">
+                        Images will be saved in: TPRKSPGKPC/product_images/
+                    </div>
                     <img id="photoPreview" class="photo-preview hidden">
                 </div>
                 <div class="form-group">
@@ -686,6 +700,9 @@
                     </button>
                     <input type="file" id="importFile" class="file-input" accept=".json">
                 </div>
+                <button id="migrateBtn" class="migrate-btn">
+                    <i class="fas fa-sync"></i> Migrate Images
+                </button>
             </div>
             <div class="search-and-actions">
                 <div class="search-bar-wrapper">
@@ -783,12 +800,46 @@
             const closeModal = document.querySelector('.close');
             const exportBtn = document.getElementById('exportBtn');
             const importFileInput = document.getElementById('importFile');
+            const migrateBtn = document.getElementById('migrateBtn');
 
             let calculationTimeout;
             let extraAmounts = [];
 
+            // Image path configuration
+            const IMAGE_BASE_PATH = 'TPRKSPGKPC/product_images/';
+
             // Initialize
             loadProducts();
+
+            // Migration function to convert base64 images to file references
+            function migrateImagesToFiles() {
+                const products = JSON.parse(localStorage.getItem('products')) || [];
+                let migratedCount = 0;
+                
+                products.forEach(product => {
+                    // Check if product has base64 image data but no filename
+                    if (product.photo && product.photo.startsWith('data:image/') && !product.imageFilename) {
+                        // Generate filename
+                        const fileExtension = product.photo.split(';')[0].split('/')[1];
+                        const imageFilename = `${product.code}.${fileExtension}`;
+                        
+                        // Replace base64 data with filename
+                        product.imageFilename = imageFilename;
+                        delete product.photo; // Remove base64 data to save space
+                        migratedCount++;
+                        
+                        showNotification(`Generated filename for ${product.code}: ${imageFilename}`);
+                    }
+                });
+                
+                if (migratedCount > 0) {
+                    localStorage.setItem('products', JSON.stringify(products));
+                    showNotification(`Successfully migrated ${migratedCount} images to file-based system!`);
+                    loadProducts();
+                } else {
+                    showNotification('No base64 images found to migrate.');
+                }
+            }
 
             // Price Calculation Functions
             function calculatePrices() {
@@ -975,25 +1026,20 @@
                     productCode = editProductCode.value;
                 }
                 
-                let photoBase64 = '';
+                let imageFilename = '';
                 if (skuPhotoInput.files.length > 0) {
                     const file = skuPhotoInput.files[0];
-                    const reader = new FileReader();
-                    reader.onload = function(event) {
-                        photoBase64 = event.target.result;
-                        saveToLocalStorage(productCode, itemName, manufacturerName, unitPrice, sellingPrice, margin, marginAmount, totalSales, totalProfits, description, photoBase64, prefix);
-                    };
-                    reader.readAsDataURL(file);
-                } else {
-                    if (editIndex !== undefined) {
-                        const products = JSON.parse(localStorage.getItem('products')) || [];
-                        photoBase64 = products[editIndex].photo || '';
-                    }
-                    saveToLocalStorage(productCode, itemName, manufacturerName, unitPrice, sellingPrice, margin, marginAmount, totalSales, totalProfits, description, photoBase64, prefix);
+                    // Generate filename based on product code
+                    const fileExtension = file.name.split('.').pop();
+                    imageFilename = `${productCode}.${fileExtension}`;
+                    
+                    showNotification(`Image will be saved as: ${IMAGE_BASE_PATH}${imageFilename}. Please ensure the file is placed in the correct folder.`);
                 }
+                
+                saveToLocalStorage(productCode, itemName, manufacturerName, unitPrice, sellingPrice, margin, marginAmount, totalSales, totalProfits, description, imageFilename, prefix);
             }
 
-            function saveToLocalStorage(code, name, manufacturer, unitPrice, sellingPrice, margin, marginAmount, totalSales, totalProfits, description, photo, prefix) {
+            function saveToLocalStorage(code, name, manufacturer, unitPrice, sellingPrice, margin, marginAmount, totalSales, totalProfits, description, imageFilename, prefix) {
                 const products = JSON.parse(localStorage.getItem('products')) || [];
                 const editIndex = productForm.dataset.editIndex;
                 
@@ -1013,9 +1059,9 @@
                     marginAmount: finalMarginAmount, 
                     totalSales, 
                     totalProfits,
-                    extraAmounts: [...extraAmounts], // Save all extra amounts
-                    description, 
-                    photo, 
+                    extraAmounts: [...extraAmounts],
+                    description,
+                    imageFilename, // Store only the filename, not the base64 data
                     prefix 
                 };
                 
@@ -1080,6 +1126,16 @@
                         }).join('<br>');
                     }
                     
+                    // Build image display - supports both old base64 and new file-based images
+                    let imageDisplay = 'No Image';
+                    if (product.imageFilename) {
+                        const imagePath = `${IMAGE_BASE_PATH}${product.imageFilename}`;
+                        imageDisplay = `<img src="${imagePath}" class="product-image" onclick="showImageModal('${imagePath.replace(/'/g, "\\'")}')" onerror="handleImageError(this, '${product.code}')">`;
+                    } else if (product.photo && product.photo.startsWith('data:image/')) {
+                        // Fallback to base64 for existing images
+                        imageDisplay = `<img src="${product.photo}" class="product-image" onclick="showImageModal('${product.photo.replace(/'/g, "\\'")}')">`;
+                    }
+                    
                     row.innerHTML = `
                         <td>
                             <input type="checkbox" class="select-checkbox" data-index="${index}">
@@ -1087,9 +1143,7 @@
                         <td style="${deliveryColor} font-weight: bold;">${product.code}</td>
                         <td>${product.name}</td>
                         <td>${product.manufacturer || '-'}</td>
-                        <td>
-                            ${product.photo ? `<img src="${product.photo}" class="product-image" onclick="showImageModal('${product.photo.replace(/'/g, "\\'")}')">` : 'No Image'}
-                        </td>
+                        <td>${imageDisplay}</td>
                         <td>₹${product.unitPrice.toFixed(2)}</td>
                         <td>₹${product.sellingPrice.toFixed(2)}${product.prefix === 'GK' ? '<br><small>(incl. ₹60 delivery)</small>' : ''}</td>
                         <td>${product.margin.toFixed(2)}%</td>
@@ -1149,7 +1203,7 @@
                 const now = new Date();
                 const dateStr = now.toISOString().split('T')[0]; // YYYY-MM-DD
                 const timeStr = now.toTimeString().split(' ')[0].replace(/:/g, '-'); // HH-MM-SS
-                const filename = `${dateStr}_${timeStr}.json`;
+                const filename = `products_backup_${dateStr}_${timeStr}.json`;
                 
                 const url = URL.createObjectURL(dataBlob);
                 const link = document.createElement('a');
@@ -1250,7 +1304,12 @@
                     extraAmounts = product.extraAmounts ? [...product.extraAmounts] : [];
                     renderExtraAmounts();
                     
-                    if (product.photo) {
+                    // Show image preview - supports both old and new image formats
+                    if (product.imageFilename) {
+                        const imagePath = `${IMAGE_BASE_PATH}${product.imageFilename}`;
+                        photoPreview.src = imagePath;
+                        photoPreview.classList.remove('hidden');
+                    } else if (product.photo && product.photo.startsWith('data:image/')) {
                         photoPreview.src = product.photo;
                         photoPreview.classList.remove('hidden');
                     } else {
@@ -1279,6 +1338,19 @@
             window.showImageModal = function(imageSrc) {
                 modalImage.src = imageSrc;
                 imageModal.style.display = 'block';
+            };
+
+            window.handleImageError = function(imgElement, productCode) {
+                // If file-based image fails to load, check if we have base64 backup
+                const products = JSON.parse(localStorage.getItem('products')) || [];
+                const product = products.find(p => p.code === productCode);
+                if (product && product.photo && product.photo.startsWith('data:image/')) {
+                    imgElement.src = product.photo;
+                    imgElement.onerror = null; // Remove the error handler to prevent infinite loop
+                } else {
+                    imgElement.style.display = 'none';
+                    imgElement.parentNode.innerHTML = 'File missing';
+                }
             };
 
             window.showInstaModal = function(index) {
@@ -1390,6 +1462,8 @@
                     e.target.value = '';
                 }
             });
+
+            migrateBtn.addEventListener('click', migrateImagesToFiles);
 
             closeModal.addEventListener('click', () => { imageModal.style.display = 'none'; });
             closeInstaModal.addEventListener('click', () => { instaModal.style.display = 'none'; });

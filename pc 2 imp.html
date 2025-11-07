@@ -207,42 +207,6 @@
             background-color: var(--bg);
         }
         .extra-amount-section h4 { margin-bottom: 10px; color: var(--primary);}
-        .modal {
-            display: none;
-            position: fixed;
-            z-index: 1000;
-            left: 0;
-            top: 0;
-            width: 100%;
-            height: 100%;
-            background-color: rgba(237,65,103,0.15);
-        }
-        .modal-content {
-            position: absolute;
-            top: 50%;
-            left: 50%;
-            transform: translate(-50%, -50%);
-            max-width: 90%;
-            max-height: 90%;
-        }
-        .modal-image {
-            width: 100%;
-            height: auto;
-            border-radius: 12px;
-            border: 4px solid var(--accent);
-            background: var(--bg);
-        }
-        .close {
-            position: absolute;
-            top: 15px;
-            right: 35px;
-            color: var(--primary);
-            font-size: 40px;
-            font-weight: bold;
-            cursor: pointer;
-            z-index: 2;
-        }
-        .close:hover { color: var(--accent);}
         .insta-modal {
             display: none;
             position: fixed;
@@ -510,7 +474,7 @@
             align-items: center;
         }
         
-        .export-btn, .import-btn, .migrate-btn {
+        .export-btn, .import-btn {
             background: var(--secondary);
             color: var(--text);
             border: none;
@@ -524,13 +488,8 @@
             transition: background-color 0.2s, color 0.2s;
         }
         
-        .export-btn:hover, .import-btn:hover, .migrate-btn:hover {
+        .export-btn:hover, .import-btn:hover {
             background: var(--primary);
-            color: white;
-        }
-        
-        .migrate-btn {
-            background: var(--accent);
             color: white;
         }
         
@@ -549,12 +508,6 @@
             cursor: pointer;
         }
         
-        .image-path-info {
-            font-size: 0.8rem;
-            color: var(--muted);
-            margin-top: 5px;
-        }
-        
         @media (max-width: 900px) {
             .main-container { flex-direction: column; }
             .form-container { width: 100vw; position: fixed; left: 0; top: 0; height: 100vh; z-index: 20;}
@@ -570,12 +523,17 @@
 <body>
     <header>
         <div class="logo">
-            <img class="logo-img" src="tp.png" alt="Logo">
+            <img class="logo-img" src="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxMDAgMTAwIj48cmVjdCB3aWR0aD0iMTAwIiBoZWlnaHQ9IjEwMCIgZmlsbD0iIzk2ZGVkNSIvPjx0ZXh0IHg9IjUwIiB5PSI1MCIgZm9udC1mYW1pbHk9IkFyaWFsIiBmb250LXNpemU9IjE0IiBmaWxsPSIjZmZmIiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBkeT0iMC4zNWVtIj5UUCBMb2dvPC90ZXh0Pjwvc3ZnPg==" alt="Logo">
             <span class="header-title">Product Management System</span>
         </div>
-        <button id="showFormBtn" class="add-product-btn">
-            <i class="fas fa-plus"></i> Add Product
-        </button>
+        <div style="display:flex; align-items:center; gap:10px;">
+          <button id="migrateBtn" title="Migrate from localStorage" style="background:#fff;border-radius:60px;padding:8px 12px;border:none;cursor:pointer;font-weight:700;">
+            <i class="fas fa-database"></i> Migrate
+          </button>
+          <button id="showFormBtn" class="add-product-btn">
+              <i class="fas fa-plus"></i> Add Product
+          </button>
+        </div>
     </header>
     <div class="main-container">
         <div id="productFormContainer" class="form-container">
@@ -617,9 +575,6 @@
                 <div class="form-group">
                     <label for="skuPhoto">SKU Photo</label>
                     <input type="file" id="skuPhoto" accept="image/*">
-                    <div class="image-path-info" id="imagePathInfo">
-                        Images will be saved in: TPRKSPGKPC/product_images/
-                    </div>
                     <img id="photoPreview" class="photo-preview hidden">
                 </div>
                 <div class="form-group">
@@ -700,9 +655,6 @@
                     </button>
                     <input type="file" id="importFile" class="file-input" accept=".json">
                 </div>
-                <button id="migrateBtn" class="migrate-btn">
-                    <i class="fas fa-sync"></i> Migrate Images
-                </button>
             </div>
             <div class="search-and-actions">
                 <div class="search-bar-wrapper">
@@ -762,6 +714,139 @@
         <div class="notification-content"></div>
     </div>
     <script>
+        /******************************
+         * IndexedDB + Image utilities
+         ******************************/
+        function openDB() {
+          return new Promise((resolve, reject) => {
+            const req = indexedDB.open('pms-db', 1);
+            req.onupgradeneeded = (e) => {
+              const db = e.target.result;
+              if (!db.objectStoreNames.contains('products')) {
+                const store = db.createObjectStore('products', { keyPath: 'code' });
+                store.createIndex('name', 'name', { unique: false });
+                store.createIndex('createdAt', 'createdAt', { unique: false });
+              }
+            };
+            req.onsuccess = () => resolve(req.result);
+            req.onerror = () => reject(req.error);
+          });
+        }
+
+        async function saveProductIDB(product) {
+          const db = await openDB();
+          return new Promise((resolve, reject) => {
+            const tx = db.transaction('products', 'readwrite');
+            const store = tx.objectStore('products');
+            if (!product.createdAt) product.createdAt = new Date().toISOString();
+            store.put(product);
+            tx.oncomplete = () => { db.close(); resolve(true); };
+            tx.onerror = () => { db.close(); reject(tx.error); };
+          });
+        }
+
+        async function getAllProductsIDB() {
+          const db = await openDB();
+          return new Promise((resolve, reject) => {
+            const tx = db.transaction('products', 'readonly');
+            const store = tx.objectStore('products');
+            const req = store.getAll();
+            req.onsuccess = () => { db.close(); resolve(req.result || []); };
+            req.onerror = () => { db.close(); reject(req.error); };
+          });
+        }
+
+        async function deleteProductIDB(code) {
+          const db = await openDB();
+          return new Promise((resolve, reject) => {
+            const tx = db.transaction('products', 'readwrite');
+            tx.objectStore('products').delete(code);
+            tx.oncomplete = () => { db.close(); resolve(true); };
+            tx.onerror = () => { db.close(); reject(tx.error); };
+          });
+        }
+
+        async function clearProductsIDB() {
+          const db = await openDB();
+          return new Promise((resolve, reject) => {
+            const tx = db.transaction('products', 'readwrite');
+            tx.objectStore('products').clear();
+            tx.oncomplete = () => { db.close(); resolve(true); };
+            tx.onerror = () => { db.close(); reject(tx.error); };
+          });
+        }
+
+        function resizeImageFile(file, maxSide = 900, quality = 0.7) {
+          return new Promise((resolve, reject) => {
+            if (!file) return resolve(null);
+            const img = new Image();
+            const reader = new FileReader();
+            reader.onload = (ev) => {
+              img.onload = () => {
+                const canvas = document.createElement('canvas');
+                let { width, height } = img;
+                const ratio = width / height;
+                if (width > height) {
+                  if (width > maxSide) { width = maxSide; height = Math.round(maxSide / ratio); }
+                } else {
+                  if (height > maxSide) { height = maxSide; width = Math.round(maxSide * ratio); }
+                }
+                canvas.width = width;
+                canvas.height = height;
+                const ctx = canvas.getContext('2d');
+                ctx.drawImage(img, 0, 0, width, height);
+                try {
+                  const dataUrl = canvas.toDataURL('image/jpeg', quality);
+                  resolve(dataUrl);
+                } catch (err) {
+                  resolve(ev.target.result);
+                }
+              };
+              img.onerror = () => resolve(null);
+              img.src = ev.target.result;
+            };
+            reader.onerror = () => reject(reader.error);
+            reader.readAsDataURL(file);
+          });
+        }
+
+        async function migrateLocalToIDB() {
+          const raw = localStorage.getItem('products');
+          if (!raw) {
+            showNotification('No products in localStorage to migrate', false);
+            return { migrated: 0 };
+          }
+          let arr;
+          try {
+            arr = JSON.parse(raw);
+            if (!Array.isArray(arr)) throw new Error('products not array');
+          } catch (e) {
+            showNotification('Invalid products data in localStorage', false);
+            console.error(e);
+            return { migrated: 0, error: e.message };
+          }
+
+          const db = await openDB();
+          const tx = db.transaction('products', 'readwrite');
+          const store = tx.objectStore('products');
+          let count = 0;
+
+          for (const p of arr) {
+            if (!p.code) p.code = (p.prefix || 'RK') + Math.floor(1000 + Math.random() * 9000);
+            if (!p.createdAt) p.createdAt = new Date().toISOString();
+            store.put(p);
+            count++;
+          }
+
+          return new Promise((resolve, reject) => {
+            tx.oncomplete = () => { db.close(); showNotification(`Migrated ${count} product(s) to IndexedDB`); resolve({ migrated: count }); };
+            tx.onerror = () => { db.close(); reject(tx.error); };
+          });
+        }
+
+        /******************************
+         * App logic + DOM interactions
+         ******************************/
         document.addEventListener('DOMContentLoaded', function() {
             // DOM Elements
             const showFormBtn = document.getElementById('showFormBtn');
@@ -804,44 +889,21 @@
 
             let calculationTimeout;
             let extraAmounts = [];
-
-            // Image path configuration
-            const IMAGE_BASE_PATH = 'TPRKSPGKPC/product_images/';
+            let currentEditCode = null; // for editing
 
             // Initialize
             loadProducts();
 
-            // Migration function to convert base64 images to file references
-            function migrateImagesToFiles() {
-                const products = JSON.parse(localStorage.getItem('products')) || [];
-                let migratedCount = 0;
-                
-                products.forEach(product => {
-                    // Check if product has base64 image data but no filename
-                    if (product.photo && product.photo.startsWith('data:image/') && !product.imageFilename) {
-                        // Generate filename
-                        const fileExtension = product.photo.split(';')[0].split('/')[1];
-                        const imageFilename = `${product.code}.${fileExtension}`;
-                        
-                        // Replace base64 data with filename
-                        product.imageFilename = imageFilename;
-                        delete product.photo; // Remove base64 data to save space
-                        migratedCount++;
-                        
-                        showNotification(`Generated filename for ${product.code}: ${imageFilename}`);
-                    }
+            // Price Calculation Functions
+            function calculateTotalExtraAmountsList(list) {
+                let total = 0;
+                (list || extraAmounts).forEach(item => {
+                    if (item.type === 'credit') total += item.amount;
+                    else total -= item.amount;
                 });
-                
-                if (migratedCount > 0) {
-                    localStorage.setItem('products', JSON.stringify(products));
-                    showNotification(`Successfully migrated ${migratedCount} images to file-based system!`);
-                    loadProducts();
-                } else {
-                    showNotification('No base64 images found to migrate.');
-                }
+                return total;
             }
 
-            // Price Calculation Functions
             function calculatePrices() {
                 const unitPrice = parseFloat(unitPriceInput.value) || 0;
                 let sellingPrice = parseFloat(sellingPriceInput.value) || 0;
@@ -849,10 +911,10 @@
                 const totalSales = parseFloat(totalSalesInput.value) || 0;
                 const deliveryType = document.querySelector('input[name="deliveryType"]:checked').value;
                 const isGK = deliveryType === 'GK';
-                const deliveryCost = isGK ? 60 : 0;
+                const deliveryCost = isGK ? 70 : 0; // <-- updated shipping cost to 70
 
                 // Calculate total extra amounts
-                const totalExtraAmount = calculateTotalExtraAmounts();
+                const totalExtraAmount = calculateTotalExtraAmountsList();
 
                 // Determine which field was last active
                 const activeElement = document.activeElement;
@@ -883,18 +945,6 @@
                 // Calculate total profits
                 const totalProfits = (marginAmount * totalSales) + totalExtraAmount;
                 totalProfitsInput.value = totalProfits.toFixed(2);
-            }
-
-            function calculateTotalExtraAmounts() {
-                let total = 0;
-                extraAmounts.forEach(item => {
-                    if (item.type === 'credit') {
-                        total += item.amount;
-                    } else {
-                        total -= item.amount;
-                    }
-                });
-                return total;
             }
 
             function setupCalculationListener(input) {
@@ -960,14 +1010,14 @@
                 calculatePrices();
             }
 
-            function renderExtraAmounts() {
+            function renderExtraAmounts(list = extraAmounts) {
                 extraAmountsList.innerHTML = '';
                 
-                if (extraAmounts.length === 0) {
+                if (!list || list.length === 0) {
                     return;
                 }
                 
-                extraAmounts.forEach((item, index) => {
+                list.forEach((item, index) => {
                     const amountItem = document.createElement('div');
                     amountItem.className = 'extra-amount-item';
                     
@@ -977,12 +1027,21 @@
                             <span class="extra-amount-value ${item.type}">${item.type === 'credit' ? '+' : '-'}₹${item.amount.toFixed(2)}</span>
                         </div>
                         <div class="extra-amount-description">${item.type === 'credit' ? 'Credit' : 'Debit'}</div>
-                        <button class="remove-extra-amount" onclick="removeExtraAmount(${index})">
+                        <button class="remove-extra-amount" data-index="${index}">
                             <i class="fas fa-times"></i>
                         </button>
                     `;
                     
                     extraAmountsList.appendChild(amountItem);
+                });
+
+                extraAmountsList.querySelectorAll('.remove-extra-amount').forEach(btn => {
+                  btn.addEventListener('click', () => {
+                    const idx = parseInt(btn.dataset.index);
+                    extraAmounts.splice(idx, 1);
+                    renderExtraAmounts();
+                    calculatePrices();
+                  });
                 });
             }
 
@@ -994,65 +1053,72 @@
                 return productCode;
             }
 
-            function checkForDuplicateProduct(name) {
-                const products = JSON.parse(localStorage.getItem('products')) || [];
-                const editIndex = productForm.dataset.editIndex;
-                const exists = products.some((product, index) => {
-                    if (editIndex !== undefined && index == editIndex) return false;
-                    return product.name.toLowerCase() === name.toLowerCase();
+            async function checkForDuplicateProduct(name) {
+                if (!name) { sameProductWarning.style.display = 'none'; return false; }
+                const products = await getAllProductsIDB();
+                const editCode = currentEditCode;
+                const exists = products.some((product) => {
+                    if (!product.name) return false;
+                    return product.name.toLowerCase() === name.toLowerCase() && product.code !== editCode;
                 });
                 sameProductWarning.style.display = exists ? 'block' : 'none';
                 return exists;
             }
 
             function saveProduct() {
-                let prefix = document.querySelector('input[name="deliveryType"]:checked').value;
-                let productCode = document.getElementById('productCodeDisplay').textContent;
-                let itemName = itemNameInput.value;
-                let manufacturerName = document.getElementById('manufacturerName').value;
-                let unitPrice = parseFloat(unitPriceInput.value) || 0;
-                let sellingPrice = parseFloat(sellingPriceInput.value) || 0;
-                let margin = parseFloat(marginInput.value) || 0;
-                let marginAmount = parseFloat(marginAmountInput.value) || 0;
-                let totalSales = parseFloat(totalSalesInput.value) || 0;
-                let totalProfits = parseFloat(totalProfitsInput.value) || 0;
-                let description = document.getElementById('description').value;
-                const editIndex = productForm.dataset.editIndex;
-                
-                if (editIndex === undefined && checkForDuplicateProduct(itemName)) {
-                    if (!confirm('A product with this name already exists. Are you sure you want to continue?')) return;
-                }
-                if (editIndex !== undefined && editProductCode.value) {
-                    productCode = editProductCode.value;
-                }
-                
-                let imageFilename = '';
-                if (skuPhotoInput.files.length > 0) {
-                    const file = skuPhotoInput.files[0];
-                    // Generate filename based on product code
-                    const fileExtension = file.name.split('.').pop();
-                    imageFilename = `${productCode}.${fileExtension}`;
-                    
-                    showNotification(`Image will be saved as: ${IMAGE_BASE_PATH}${imageFilename}. Please ensure the file is placed in the correct folder.`);
-                }
-                
-                saveToLocalStorage(productCode, itemName, manufacturerName, unitPrice, sellingPrice, margin, marginAmount, totalSales, totalProfits, description, imageFilename, prefix);
+                productForm.dispatchEvent(new Event('submit', {cancelable: true}));
             }
 
-            function saveToLocalStorage(code, name, manufacturer, unitPrice, sellingPrice, margin, marginAmount, totalSales, totalProfits, description, imageFilename, prefix) {
-                const products = JSON.parse(localStorage.getItem('products')) || [];
-                const editIndex = productForm.dataset.editIndex;
-                
-                // For GK type, adjust margin amount by subtracting 60
+            // Form submit handler uses IndexedDB
+            productForm.addEventListener('submit', async function(e) {
+                e.preventDefault();
+
+                const prefix = document.querySelector('input[name="deliveryType"]:checked').value;
+                let productCode = document.getElementById('productCodeDisplay').textContent;
+                if (currentEditCode && editProductCode.value) productCode = editProductCode.value;
+
+                const itemName = itemNameInput.value.trim();
+                if (!itemName) { alert('Item Name is required'); return; }
+
+                const duplicate = await checkForDuplicateProduct(itemName);
+                if (duplicate) {
+                    if (!confirm('A product with this name already exists. Are you sure you want to continue?')) return;
+                }
+
+                const manufacturerName = document.getElementById('manufacturerName').value.trim();
+                const unitPrice = parseFloat(unitPriceInput.value) || 0;
+                const sellingPrice = parseFloat(sellingPriceInput.value) || 0;
+                const margin = parseFloat(marginInput.value) || 0;
+                const marginAmount = parseFloat(marginAmountInput.value) || 0;
+                const totalSales = parseFloat(totalSalesInput.value) || 0;
+                const totalProfits = parseFloat(totalProfitsInput.value) || 0;
+                const description = document.getElementById('description').value || '';
+
+                // handle photo: resize then store base64
+                let photoBase64 = '';
+                if (skuPhotoInput.files.length > 0) {
+                    try {
+                        photoBase64 = await resizeImageFile(skuPhotoInput.files[0], 900, 0.7);
+                    } catch (err) {
+                        console.error('image resize error', err);
+                        photoBase64 = '';
+                    }
+                } else if (currentEditCode) {
+                    const products = await getAllProductsIDB();
+                    const existing = products.find(p => p.code === currentEditCode);
+                    if (existing) photoBase64 = existing.photo || '';
+                }
+
+                // For GK type, adjust margin amount by subtracting 70 (updated)
                 let finalMarginAmount = sellingPrice - unitPrice;
                 if (prefix === 'GK') {
-                    finalMarginAmount -= 60;
+                    finalMarginAmount -= 70; // <-- updated here too
                 }
-                
+
                 const product = { 
-                    code, 
-                    name, 
-                    manufacturer, 
+                    code: productCode, 
+                    name: itemName, 
+                    manufacturer: manufacturerName, 
                     unitPrice, 
                     sellingPrice, 
                     margin, 
@@ -1061,24 +1127,18 @@
                     totalProfits,
                     extraAmounts: [...extraAmounts],
                     description,
-                    imageFilename, // Store only the filename, not the base64 data
-                    prefix 
+                    photo: photoBase64, 
+                    prefix,
+                    createdAt: new Date().toISOString()
                 };
-                
-                if (editIndex !== undefined) {
-                    products[editIndex] = product;
-                    delete productForm.dataset.editIndex;
-                    showNotification('Product updated successfully!');
-                } else {
-                    products.push(product);
-                    showNotification('Product saved successfully!');
-                }
-                
-                localStorage.setItem('products', JSON.stringify(products));
+
+                await saveProductIDB(product);
+
+                showNotification(currentEditCode ? 'Product updated successfully!' : 'Product saved successfully!');
                 resetForm();
                 productFormContainer.classList.remove('show');
-                loadProducts();
-            }
+                await loadProducts();
+            });
 
             function resetForm() {
                 productForm.reset();
@@ -1091,13 +1151,13 @@
                 editCodeGroup.style.display = 'none';
                 editProductCode.value = '';
                 extraAmounts = [];
-                extraAmountsList.innerHTML = '';
-                delete productForm.dataset.editIndex;
+                renderExtraAmounts();
+                currentEditCode = null;
             }
 
             // Product List Functions
-            function loadProducts() {
-                const products = JSON.parse(localStorage.getItem('products')) || [];
+            async function loadProducts() {
+                const products = await getAllProductsIDB();
                 productTableBody.innerHTML = '';
                 
                 if (products.length === 0) {
@@ -1110,6 +1170,9 @@
                 noProductsMessage.style.display = 'none';
                 multiDeleteBtn.disabled = true;
                 
+                // sort by createdAt descending
+                products.sort((a,b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
+
                 products.forEach((product, index) => {
                     const row = document.createElement('tr');
                     let deliveryColor = '';
@@ -1126,39 +1189,31 @@
                         }).join('<br>');
                     }
                     
-                    // Build image display - supports both old base64 and new file-based images
-                    let imageDisplay = 'No Image';
-                    if (product.imageFilename) {
-                        const imagePath = `${IMAGE_BASE_PATH}${product.imageFilename}`;
-                        imageDisplay = `<img src="${imagePath}" class="product-image" onclick="showImageModal('${imagePath.replace(/'/g, "\\'")}')" onerror="handleImageError(this, '${product.code}')">`;
-                    } else if (product.photo && product.photo.startsWith('data:image/')) {
-                        // Fallback to base64 for existing images
-                        imageDisplay = `<img src="${product.photo}" class="product-image" onclick="showImageModal('${product.photo.replace(/'/g, "\\'")}')">`;
-                    }
-                    
                     row.innerHTML = `
                         <td>
-                            <input type="checkbox" class="select-checkbox" data-index="${index}">
+                            <input type="checkbox" class="select-checkbox" data-code="${escapeHtml(product.code)}">
                         </td>
-                        <td style="${deliveryColor} font-weight: bold;">${product.code}</td>
-                        <td>${product.name}</td>
-                        <td>${product.manufacturer || '-'}</td>
-                        <td>${imageDisplay}</td>
-                        <td>₹${product.unitPrice.toFixed(2)}</td>
-                        <td>₹${product.sellingPrice.toFixed(2)}${product.prefix === 'GK' ? '<br><small>(incl. ₹60 delivery)</small>' : ''}</td>
-                        <td>${product.margin.toFixed(2)}%</td>
-                        <td>₹${product.marginAmount.toFixed(2)}</td>
-                        <td>${product.totalSales} <i class="fas fa-edit edit-icon action-icon" onclick="editTotalSales(${index})" style="margin-left: 5px; font-size: 12px;" title="Edit Total Sales"></i></td>
-                        <td class="calculated-value">₹${product.totalProfits.toFixed(2)}</td>
+                        <td style="${deliveryColor} font-weight: bold;">${escapeHtml(product.code)}</td>
+                        <td>${escapeHtml(product.name)}</td>
+                        <td>${escapeHtml(product.manufacturer || '-')}</td>
+                        <td>
+                            ${product.photo ? `<img src="${product.photo}" class="product-image" data-photo="${product.photo}">` : 'No Image'}
+                        </td>
+                        <td>₹${formatNumber(product.unitPrice)}</td>
+                        <td>₹${formatNumber(product.sellingPrice)}${product.prefix === 'GK' ? '<br><small>(incl. ₹70 delivery)</small>' : ''}</td>
+                        <td>${formatNumber(product.margin)}%</td>
+                        <td>₹${formatNumber(product.marginAmount)}</td>
+                        <td>${formatNumber(product.totalSales)} <i class="fas fa-edit edit-icon action-icon edit-total-sales" data-code="${escapeHtml(product.code)}" style="margin-left: 5px; font-size: 12px;" title="Edit Total Sales"></i></td>
+                        <td class="calculated-value">₹${formatNumber(product.totalProfits)}</td>
                         <td>${extraAmountsDisplay}</td>
-                        <td>${product.description || '-'}</td>
+                        <td>${escapeHtml(product.description || '-')}</td>
                         <td>
                             <div class="actions-icons-flex">
-                                <button class="insta-btn-action" onclick="showInstaModal(${index})" title="Copy for Instagram">
+                                <button class="insta-btn-action" data-code="${escapeHtml(product.code)}" title="Copy for Instagram">
                                     <i class="fab fa-instagram"></i>
                                 </button>
-                                <i class="fas fa-edit edit-icon action-icon" onclick="editProduct(${index})"></i>
-                                <i class="fas fa-trash delete-icon action-icon" onclick="deleteProduct(${index})"></i>
+                                <i class="fas fa-edit edit-icon action-icon" data-code="${escapeHtml(product.code)}"></i>
+                                <i class="fas fa-trash delete-icon action-icon" data-code="${escapeHtml(product.code)}"></i>
                             </div>
                         </td>
                     `;
@@ -1186,81 +1241,34 @@
                     multiDeleteBtn.disabled = selectedCount === 0;
                     selectAllCheckbox.checked = selectedCount === checkboxes.length && checkboxes.length > 0;
                 }
-            }
 
-            // Data Export/Import Functions
-            function exportData() {
-                const products = JSON.parse(localStorage.getItem('products')) || [];
-                if (products.length === 0) {
-                    showNotification('No data to export', false);
-                    return;
-                }
-                
-                const dataStr = JSON.stringify(products, null, 2);
-                const dataBlob = new Blob([dataStr], {type: 'application/json'});
-                
-                // Generate filename with date and time
-                const now = new Date();
-                const dateStr = now.toISOString().split('T')[0]; // YYYY-MM-DD
-                const timeStr = now.toTimeString().split(' ')[0].replace(/:/g, '-'); // HH-MM-SS
-                const filename = `products_backup_${dateStr}_${timeStr}.json`;
-                
-                const url = URL.createObjectURL(dataBlob);
-                const link = document.createElement('a');
-                link.href = url;
-                link.download = filename;
-                document.body.appendChild(link);
-                link.click();
-                document.body.removeChild(link);
-                URL.revokeObjectURL(url);
-                
-                showNotification('Data exported successfully!');
-            }
+                // wire image clicks
+                productTableBody.querySelectorAll('.product-image').forEach(img => {
+                  img.addEventListener('click', () => {
+                    modalImage.src = img.dataset.photo || img.src;
+                    imageModal.style.display = 'block';
+                  });
+                });
 
-            function importData(file) {
-                const reader = new FileReader();
-                reader.onload = function(e) {
-                    try {
-                        const importedData = JSON.parse(e.target.result);
-                        
-                        if (!Array.isArray(importedData)) {
-                            throw new Error('Invalid file format');
-                        }
-                        
-                        // Validate the data structure
-                        const isValid = importedData.every(item => 
-                            item.code && item.name && typeof item.unitPrice === 'number'
-                        );
-                        
-                        if (!isValid) {
-                            throw new Error('Invalid data structure in file');
-                        }
-                        
-                        if (confirm(`This will import ${importedData.length} products. Do you want to replace your current data or merge with existing data?`)) {
-                            // Replace current data
-                            localStorage.setItem('products', JSON.stringify(importedData));
-                            showNotification('Data imported successfully!');
-                            loadProducts();
-                        } else if (confirm('Would you like to merge with existing data instead?')) {
-                            // Merge with existing data
-                            const existingProducts = JSON.parse(localStorage.getItem('products')) || [];
-                            const mergedProducts = [...existingProducts, ...importedData];
-                            localStorage.setItem('products', JSON.stringify(mergedProducts));
-                            showNotification('Data merged successfully!');
-                            loadProducts();
-                        }
-                    } catch (error) {
-                        console.error('Import error:', error);
-                        showNotification('Error importing data: ' + error.message, false);
-                    }
-                };
-                reader.readAsText(file);
+                // wire actions
+                productTableBody.querySelectorAll('.edit-icon').forEach(btn => {
+                  btn.addEventListener('click', () => editProduct(btn.dataset.code));
+                });
+                productTableBody.querySelectorAll('.delete-icon').forEach(btn => {
+                  btn.addEventListener('click', () => deleteProduct(btn.dataset.code));
+                });
+                productTableBody.querySelectorAll('.insta-btn-action').forEach(btn => {
+                  btn.addEventListener('click', () => showInstaModal(btn.dataset.code));
+                });
+                productTableBody.querySelectorAll('.edit-total-sales').forEach(btn => {
+                  btn.addEventListener('click', () => editTotalSales(btn.dataset.code));
+                });
             }
 
             // Global Functions
-            window.editTotalSales = function(index) {
-                const products = JSON.parse(localStorage.getItem('products')) || [];
-                const product = products[index];
+            window.editTotalSales = async function(code) {
+                const products = await getAllProductsIDB();
+                const product = products.find(p => p.code === code);
                 if (product) {
                     const newTotalSales = prompt('Enter new Total Sales quantity:', product.totalSales);
                     if (newTotalSales !== null && !isNaN(newTotalSales) && newTotalSales >= 0) {
@@ -1274,17 +1282,17 @@
                         
                         product.totalProfits = (product.marginAmount * product.totalSales) + totalExtraAmount;
                         
-                        localStorage.setItem('products', JSON.stringify(products));
-                        loadProducts();
+                        await saveProductIDB(product);
+                        await loadProducts();
                     } else if (newTotalSales !== null) {
                         alert('Please enter a valid number greater than or equal to 0.');
                     }
                 }
             };
 
-            window.editProduct = function(index) {
-                const products = JSON.parse(localStorage.getItem('products')) || [];
-                const product = products[index];
+            window.editProduct = async function(code) {
+                const products = await getAllProductsIDB();
+                const product = products.find(p => p.code === code);
                 if (product) {
                     document.querySelector(`input[value="${product.prefix}"]`).checked = true;
                     document.getElementById('productCodeDisplay').textContent = product.code;
@@ -1304,28 +1312,21 @@
                     extraAmounts = product.extraAmounts ? [...product.extraAmounts] : [];
                     renderExtraAmounts();
                     
-                    // Show image preview - supports both old and new image formats
-                    if (product.imageFilename) {
-                        const imagePath = `${IMAGE_BASE_PATH}${product.imageFilename}`;
-                        photoPreview.src = imagePath;
-                        photoPreview.classList.remove('hidden');
-                    } else if (product.photo && product.photo.startsWith('data:image/')) {
+                    if (product.photo) {
                         photoPreview.src = product.photo;
                         photoPreview.classList.remove('hidden');
                     } else {
                         photoPreview.classList.add('hidden');
                     }
                     productFormContainer.classList.add('show');
-                    productForm.dataset.editIndex = index;
+                    currentEditCode = product.code;
                 }
             };
 
-            window.deleteProduct = function(index) {
+            window.deleteProduct = async function(code) {
                 if (confirm('Are you sure you want to delete this product?')) {
-                    const products = JSON.parse(localStorage.getItem('products')) || [];
-                    products.splice(index, 1);
-                    localStorage.setItem('products', JSON.stringify(products));
-                    loadProducts();
+                    await deleteProductIDB(code);
+                    await loadProducts();
                 }
             };
 
@@ -1340,22 +1341,9 @@
                 imageModal.style.display = 'block';
             };
 
-            window.handleImageError = function(imgElement, productCode) {
-                // If file-based image fails to load, check if we have base64 backup
-                const products = JSON.parse(localStorage.getItem('products')) || [];
-                const product = products.find(p => p.code === productCode);
-                if (product && product.photo && product.photo.startsWith('data:image/')) {
-                    imgElement.src = product.photo;
-                    imgElement.onerror = null; // Remove the error handler to prevent infinite loop
-                } else {
-                    imgElement.style.display = 'none';
-                    imgElement.parentNode.innerHTML = 'File missing';
-                }
-            };
-
-            window.showInstaModal = function(index) {
-                const products = JSON.parse(localStorage.getItem('products')) || [];
-                const product = products[index];
+            window.showInstaModal = async function(code) {
+                const products = await getAllProductsIDB();
+                const product = products.find(p => p.code === code);
                 let desc = product.description || "";
                 desc = desc.replace(/SAUSc/gi, product.code);
                 const instaText = `${product.name}\n${desc}`;
@@ -1377,11 +1365,6 @@
             formCloseBtn.addEventListener('click', function() {
                 productFormContainer.classList.remove('show');
                 resetForm();
-            });
-
-            productForm.addEventListener('submit', function(e) {
-                e.preventDefault();
-                saveProduct();
             });
 
             itemNameInput.addEventListener('input', function() {
@@ -1435,35 +1418,118 @@
                 searchInput.focus();
             });
 
-            multiDeleteBtn.addEventListener('click', function() {
-                const products = JSON.parse(localStorage.getItem('products')) || [];
+            multiDeleteBtn.addEventListener('click', async function() {
+                const products = await getAllProductsIDB();
                 const checkboxes = productTableBody.querySelectorAll('.select-checkbox');
                 const toDelete = [];
                 
                 checkboxes.forEach(cb => {
-                    if (cb.checked) toDelete.push(parseInt(cb.dataset.index));
+                    if (cb.checked) toDelete.push(cb.dataset.code);
                 });
                 
                 if (toDelete.length === 0) return;
                 if (!confirm(`Delete ${toDelete.length} selected product(s)?`)) return;
                 
-                toDelete.sort((a,b) => b-a).forEach(idx => products.splice(idx, 1));
-                localStorage.setItem('products', JSON.stringify(products));
-                loadProducts();
+                // delete by code
+                for (const code of toDelete) {
+                  await deleteProductIDB(code);
+                }
+                await loadProducts();
             });
 
             // Export/Import Event Listeners
-            exportBtn.addEventListener('click', exportData);
+            exportBtn.addEventListener('click', async function() {
+                const products = await getAllProductsIDB();
+                if (!products || products.length === 0) {
+                    showNotification('No data to export', false);
+                    return;
+                }
+                
+                const dataStr = JSON.stringify(products, null, 2);
+                const dataBlob = new Blob([dataStr], {type: 'application/json'});
+                
+                // Date formatting: dd-mm-yyyy and time with am/pm
+                const now = new Date();
+                const pad = (n) => String(n).padStart(2, '0');
+
+                const dd = pad(now.getDate());
+                const mm = pad(now.getMonth() + 1);
+                const yyyy = now.getFullYear();
+
+                let hh = now.getHours();
+                const ampm = hh >= 12 ? 'pm' : 'am';
+                hh = hh % 12;
+                if (hh === 0) hh = 12;
+                const hhStr = pad(hh);
+                const minStr = pad(now.getMinutes());
+                const secStr = pad(now.getSeconds());
+
+                const datePart = `${dd}-${mm}-${yyyy}`;
+                const timePart = `${hhStr}-${minStr}-${secStr}_${ampm}`; // e.g. 03-15-30_pm
+
+                const filename = `${datePart}_${timePart}.json`;
+                
+                const url = URL.createObjectURL(dataBlob);
+                const link = document.createElement('a');
+                link.href = url;
+                link.download = filename;
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+                URL.revokeObjectURL(url);
+                
+                showNotification('Data exported successfully!');
+            });
             
-            importFileInput.addEventListener('change', function(e) {
+            importFileInput.addEventListener('change', async function(e) {
                 if (e.target.files.length > 0) {
-                    importData(e.target.files[0]);
+                    const file = e.target.files[0];
+                    const reader = new FileReader();
+                    reader.onload = async function(ev) {
+                        try {
+                            const importedData = JSON.parse(ev.target.result);
+                            
+                            if (!Array.isArray(importedData)) {
+                                throw new Error('Invalid file format');
+                            }
+                            
+                            // Validate the data structure
+                            const isValid = importedData.every(item => 
+                                item.code && item.name && typeof item.unitPrice === 'number'
+                            );
+                            
+                            if (!isValid) {
+                                throw new Error('Invalid data structure in file');
+                            }
+                            
+                            if (confirm(`This will import ${importedData.length} products. Do you want to replace your current data or merge with existing data?`)) {
+                                // Replace current data
+                                await clearProductsIDB();
+                                for (const p of importedData) {
+                                  if (!p.createdAt) p.createdAt = new Date().toISOString();
+                                  await saveProductIDB(p);
+                                }
+                                showNotification('Data imported successfully!');
+                                await loadProducts();
+                            } else if (confirm('Would you like to merge with existing data instead?')) {
+                                // Merge with existing data
+                                for (const p of importedData) {
+                                  if (!p.createdAt) p.createdAt = new Date().toISOString();
+                                  await saveProductIDB(p);
+                                }
+                                showNotification('Data merged successfully!');
+                                await loadProducts();
+                            }
+                        } catch (error) {
+                            console.error('Import error:', error);
+                            showNotification('Error importing data: ' + error.message, false);
+                        }
+                    };
+                    reader.readAsText(file);
                     // Reset the file input
                     e.target.value = '';
                 }
             });
-
-            migrateBtn.addEventListener('click', migrateImagesToFiles);
 
             closeModal.addEventListener('click', () => { imageModal.style.display = 'none'; });
             closeInstaModal.addEventListener('click', () => { instaModal.style.display = 'none'; });
@@ -1480,22 +1546,100 @@
                     instaSuccess.style.display = 'none';
                 }, 1200);
             });
+
+            migrateBtn.addEventListener('click', async function() {
+                if (!confirm('This will try to move products from localStorage -> IndexedDB. Please EXPORT a backup first. Continue?')) return;
+                try {
+                  const res = await migrateLocalToIDB();
+                  if (res.migrated && res.migrated > 0) {
+                    // optionally clear localStorage products (ask user)
+                    if (confirm('Migration complete. Remove products from localStorage to free space?')) {
+                      localStorage.removeItem('products');
+                      showNotification('localStorage products removed.');
+                    }
+                    await loadProducts();
+                  } else {
+                    showNotification('No products migrated.', false);
+                  }
+                } catch (err) {
+                  console.error(err);
+                  showNotification('Migration failed: ' + (err.message || err), false);
+                }
+            });
         });
 
+        /********** Helpers & small utils **********/
+        function formatNumber(n) {
+            if (n === undefined || n === null || isNaN(n)) return '0.00';
+            return parseFloat(n).toFixed(2);
+        }
+        function escapeHtml(s) {
+            if (s === undefined || s === null) return '';
+            return String(s).replace(/[&<>"']/g, function(m) {
+              return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m];
+            });
+        }
+
+        /********** Storage status helper (optional) **********/
+        async function getDBStats() {
+          const db = await openDB();
+          return new Promise((resolve, reject) => {
+            const tx = db.transaction('products', 'readonly');
+            const store = tx.objectStore('products');
+            const req = store.getAll();
+            req.onsuccess = () => {
+              const items = req.result || [];
+              const count = items.length;
+              let photoBytes = 0;
+              items.forEach(it => {
+                if (it.photo && typeof it.photo === 'string') {
+                  const comma = it.photo.indexOf(',');
+                  const dataPart = comma >= 0 ? it.photo.slice(comma+1) : it.photo;
+                  photoBytes += Math.round((dataPart.length) * 3 / 4);
+                }
+              });
+              db.close();
+              resolve({ count, photoBytes, items });
+            };
+            req.onerror = () => { db.close(); reject(req.error); };
+          });
+        }
+
+        function estimateLocalStorageUsageKB() {
+          let total = 0;
+          for (let i = 0; i < localStorage.length; i++) {
+            const key = localStorage.key(i);
+            const val = localStorage.getItem(key) || '';
+            total += key.length + val.length;
+          }
+          return Math.round(total / 1024);
+        }
+
+        async function showStorageStatus() {
+          try {
+            const dbStats = await getDBStats();
+            const lsKB = estimateLocalStorageUsageKB();
+            const photoKB = Math.round(dbStats.photoBytes / 1024);
+            console.log('IndexedDB product count:', dbStats.count);
+            console.log('Approx photo storage in DB:', photoKB + ' KB');
+            console.log('localStorage usage (approx):', lsKB + ' KB');
+            return { indexedDBCount: dbStats.count, photoKB, localStorageKB: lsKB, items: dbStats.items };
+          } catch (err) {
+            console.error('Failed to get storage status', err);
+            return null;
+          }
+        }
+
+        /********** Notification helper (global) **********/
         function showNotification(message, isSuccess = true) {
             const notification = document.getElementById('notification');
             const content = notification.querySelector('.notification-content');
-            
-            // Set icon and message
             content.innerHTML = `
                 <i class="fas ${isSuccess ? 'fa-check-circle' : 'fa-exclamation-circle'}"></i>
                 <span>${message}</span>
             `;
-            // Show notification
             notification.classList.remove('notification-hidden');
             notification.classList.add('notification-visible');
-            
-            // Auto-hide after 3 seconds
             setTimeout(() => {
                 notification.classList.remove('notification-visible');
                 notification.classList.add('notification-hidden');
